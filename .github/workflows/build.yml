@@ -27,7 +27,7 @@ jobs:
         run: |
           mkdir -p src/components/layout src/pages src/lib
 
-          # Yahan hum purani cache aur lock files delete kar rahe hain
+          # Purani cache aur lock files delete karna
           rm -rf node_modules package-lock.json
 
           cat > package.json << 'ENDOFFILE'
@@ -210,7 +210,6 @@ jobs:
           export default function Dashboard() {
             const [engineOn, setEngineOn] = useState(false);
 
-            // JavaScript Engine (Runs while app is open)
             useEffect(() => {
               let interval: any;
               if (engineOn) {
@@ -632,9 +631,10 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
+      # Yahan maine command fix ki hai (ab ye </activity> ke pehle add karega)
       - name: Add Deep Link to AndroidManifest
         run: |
-          sed -i 's|<activity|<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.alcashgo.clone" android:host="auth" /></intent-filter><activity|' android/app/src/main/AndroidManifest.xml
+          sed -i 's|</activity>|<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.alcashgo.clone" android:host="auth" /></intent-filter></activity>|' android/app/src/main/AndroidManifest.xml
 
       - name: Build APK
         working-directory: android
