@@ -1,4 +1,4 @@
-name: Build AlcashGo Clone APK (Serverless BYOA)
+name: Build AlcashGo Clone APK (Fully Working)
 
 on:
   workflow_dispatch:
@@ -27,7 +27,6 @@ jobs:
         run: |
           mkdir -p src/components/layout src/pages src/lib
 
-          # Purani cache aur lock files delete karna
           rm -rf node_modules package-lock.json
 
           cat > package.json << 'ENDOFFILE'
@@ -43,6 +42,8 @@ jobs:
               "@capacitor/browser": "^6.0.2",
               "@capacitor/app": "^6.0.1",
               "@capacitor/preferences": "^6.0.1",
+              "@capacitor/camera": "^6.1.0",
+              "@capacitor-community/background-mode": "^1.0.0",
               "clsx": "^2.1.1",
               "lucide-react": "^0.454.0",
               "react": "^18.3.1",
@@ -206,9 +207,24 @@ jobs:
           cat > src/pages/Dashboard.tsx << 'ENDOFFILE'
           import { useState, useEffect } from 'react';
           import { Bell, Power, LayoutGrid, CheckCircle2, AlertCircle, Clock, Users, ChevronRight } from 'lucide-react';
+          import { BackgroundMode } from '@capacitor-community/background-mode';
 
           export default function Dashboard() {
             const [engineOn, setEngineOn] = useState(false);
+
+            const toggleEngine = async () => {
+              try {
+                if (!engineOn) {
+                  await BackgroundMode.enable();
+                  setEngineOn(true);
+                } else {
+                  await BackgroundMode.disable();
+                  setEngineOn(false);
+                }
+              } catch (e) {
+                alert("Background mode failed. Check permissions.");
+              }
+            };
 
             useEffect(() => {
               let interval: any;
@@ -220,6 +236,7 @@ jobs:
 
                   for (let post of duePosts) {
                     try {
+                      // Real Facebook Posting
                       await fetch(`https://graph.facebook.com/v21.0/${post.pageId}/feed`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -264,7 +281,7 @@ jobs:
                       <div className={`w-2 h-2 rounded-full ${engineOn ? 'bg-emerald-500' : 'bg-slate-500'}`} />
                       <h3 className="font-semibold text-white">{engineOn ? 'Engine Running' : 'Engine stopped'}</h3>
                     </div>
-                    <button onClick={() => setEngineOn(!engineOn)} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${engineOn ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-orange-500 shadow-orange-500/20'}`}>
+                    <button onClick={toggleEngine} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${engineOn ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-orange-500 shadow-orange-500/20'}`}>
                       <Power size={22} className="text-white" />
                     </button>
                   </div>
@@ -304,6 +321,16 @@ jobs:
             const [content, setContent] = useState('');
             const [firstComment, setFirstComment] = useState(false);
             const [date, setDate] = useState('');
+            const [imageBase64, setImageBase64] = useState<string | null>(null);
+
+            const handleImageUpload = (e: any) => {
+              const file = e.target.files[0];
+              if (file) {
+                const reader = new FileReader();
+                reader.onloadend = () => setImageBase64(reader.result as string);
+                reader.readAsDataURL(file);
+              }
+            };
 
             const handlePost = async () => {
               if (!content) return alert('Please write a caption!');
@@ -316,6 +343,7 @@ jobs:
                 pageId: pages[0].id,
                 pageToken: pages[0].access_token,
                 content: content,
+                imageBase64: imageBase64,
                 scheduledAt: when === 'now' ? new Date() : new Date(date),
                 status: 'pending'
               });
@@ -352,9 +380,12 @@ jobs:
                 <div>
                   <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Media</h3>
                   <div className="flex gap-3">
-                    <button className="flex-1 bg-[#1E293B] border border-slate-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium"><ImageIcon size={18} /> From library</button>
-                    <button className="flex-1 bg-[#1E293B] border border-slate-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium"><Smartphone size={18} /> From phone</button>
+                    <label className="flex-1 bg-[#1E293B] border border-slate-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium cursor-pointer">
+                      <ImageIcon size={18} /> From phone
+                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    </label>
                   </div>
+                  {imageBase64 && <p className="text-xs text-emerald-500 mt-2">Image selected!</p>}
                 </div>
 
                 <div>
@@ -631,10 +662,28 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      # Yahan maine command fix ki hai (ab ye </activity> ke pehle add karega)
-      - name: Add Deep Link to AndroidManifest
+      # Auto-Fix AndroidManifest (Deep Link + Background Permissions)
+      - name: Auto-Fix AndroidManifest
         run: |
-          sed -i 's|</activity>|<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.alcashgo.clone" android:host="auth" /></intent-filter></activity>|' android/app/src/main/AndroidManifest.xml
+          node -e "
+            const fs = require('fs');
+            const path = 'android/app/src/main/AndroidManifest.xml';
+            let content = fs.readFileSync(path, 'utf8');
+            
+            // Deep Link Intent Filter
+            const intentFilter = '<intent-filter android:autoVerify=\"true\"><action android:name=\"android.intent.action.VIEW\" /><category android:name=\"android.intent.category.DEFAULT\" /><category android:name=\"android.intent.category.BROWSABLE\" /><data android:scheme=\"com.alcashgo.clone\" android:host=\"auth\" /></intent-filter>';
+            if (!content.includes('com.alcashgo.clone')) {
+              content = content.replace('</activity>', intentFilter + '</activity>');
+            }
+
+            // Background Mode Permissions
+            const permissions = '<uses-permission android:name=\"android.permission.WAKE_LOCK\" /><uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />';
+            if (!content.includes('WAKE_LOCK')) {
+              content = content.replace('<application', permissions + '<application');
+            }
+
+            fs.writeFileSync(path, content);
+          "
 
       - name: Build APK
         working-directory: android
