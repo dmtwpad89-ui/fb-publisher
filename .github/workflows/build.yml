@@ -414,7 +414,6 @@ jobs:
               const savedPages = JSON.parse(localStorage.getItem('connected_pages') || '[]');
               setPages(savedPages);
 
-              // Deep Link Listener (Jab Facebook se wapas aaye)
               const listener = App.addListener('appUrlOpen', async (event) => {
                 if (event.url.includes('auth')) {
                   const url = new URL(event.url);
@@ -432,7 +431,6 @@ jobs:
               const appId = localStorage.getItem('fb_app_id');
               if (!appId) return alert('Please set your Facebook App ID in Settings (More tab) first!');
 
-              // Custom Deep Link URI
               const redirectUri = 'com.alcashgo.clone://auth'; 
               const url = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=pages_manage_posts,pages_show_list`;
               await Browser.open({ url });
@@ -623,8 +621,9 @@ jobs:
           }
           ENDOFFILE
 
+      # YAHAN FIX KIYA GAYA HAI (--legacy-peer-deps add kiya hai)
       - name: Install dependencies
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Build web app
         run: npm run build
@@ -635,7 +634,6 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      # Yahan hum AndroidManifest mein Deep Link add kar rahe hain
       - name: Add Deep Link to AndroidManifest
         run: |
           sed -i 's|<activity|<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.alcashgo.clone" android:host="auth" /></intent-filter><activity|' android/app/src/main/AndroidManifest.xml
