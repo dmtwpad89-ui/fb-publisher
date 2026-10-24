@@ -1,0 +1,654 @@
+name: Build AlcashGo Clone APK (Serverless BYOA)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Create project files
+        run: |
+          mkdir -p src/components/layout src/pages src/lib public
+
+          cat > package.json << 'ENDOFFILE'
+          {
+            "name": "alcashgo-clone",
+            "private": true,
+            "version": "1.0.0",
+            "type": "module",
+            "scripts": { "dev": "vite", "build": "vite build" },
+            "dependencies": {
+              "@capacitor/android": "^6.1.2",
+              "@capacitor/core": "^6.1.2",
+              "@capacitor/browser": "^6.0.2",
+              "@capacitor/app": "^6.0.1",
+              "@capacitor/background-runner": "^1.0.0",
+              "@capacitor/preferences": "^6.0.1",
+              "clsx": "^2.1.1",
+              "lucide-react": "^0.454.0",
+              "react": "^18.3.1",
+              "react-dom": "^18.3.1",
+              "react-router-dom": "^6.27.0",
+              "tailwind-merge": "^2.5.4"
+            },
+            "devDependencies": {
+              "@capacitor/cli": "^6.1.2",
+              "@types/react": "^18.3.12",
+              "@types/react-dom": "^18.3.1",
+              "@vitejs/plugin-react": "^4.3.3",
+              "autoprefixer": "^10.4.20",
+              "postcss": "^8.4.47",
+              "tailwindcss": "^3.4.14",
+              "typescript": "^5.6.3",
+              "vite": "^5.4.10"
+            }
+          }
+          ENDOFFILE
+
+          cat > vite.config.ts << 'ENDOFFILE'
+          import { defineConfig } from 'vite';
+          import react from '@vitejs/plugin-react';
+          import path from 'path';
+          export default defineConfig({
+            plugins: [react()],
+            resolve: { alias: { '@': path.resolve(__dirname, './src') } },
+          });
+          ENDOFFILE
+
+          cat > tailwind.config.js << 'ENDOFFILE'
+          export default { content: ['./index.html', './src/**/*.{ts,tsx}'], theme: { extend: {} }, plugins: [] };
+          ENDOFFILE
+
+          cat > postcss.config.js << 'ENDOFFILE'
+          export default { plugins: { tailwindcss: {}, autoprefixer: {} } };
+          ENDOFFILE
+
+          cat > tsconfig.json << 'ENDOFFILE'
+          {
+            "compilerOptions": {
+              "target": "ES2020", "module": "ESNext", "moduleResolution": "bundler",
+              "jsx": "react-jsx", "strict": false, "esModuleInterop": true,
+              "skipLibCheck": true, "baseUrl": ".", "paths": { "@/*": ["src/*"] }
+            }, "include": ["src"]
+          }
+          ENDOFFILE
+
+          cat > index.html << 'ENDOFFILE'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+              <title>AlcashGo Clone</title>
+            </head>
+            <body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body>
+          </html>
+          ENDOFFILE
+
+          cat > capacitor.config.ts << 'ENDOFFILE'
+          import { CapacitorConfig } from '@capacitor/cli';
+          const config: CapacitorConfig = {
+            appId: 'com.alcashgo.clone',
+            appName: 'AlcashGo',
+            webDir: 'dist',
+            server: { androidScheme: 'https' },
+            plugins: {
+              SplashScreen: {
+                launchShowDuration: 1500,
+                backgroundColor: '#0F172A',
+                showSpinner: false,
+              },
+              BackgroundRunner: {
+                label: 'com.alcashgo.clone.background',
+                src: 'runner.js',
+                event: 'backgroundTask',
+                repeat: true,
+                interval: 15,
+                autoStart: true
+              }
+            },
+          };
+          export default config;
+          ENDOFFILE
+
+          cat > public/runner.js << 'ENDOFFILE'
+          addEventListener('backgroundTask', async (event) => {
+            const posts = JSON.parse(localStorage.getItem('scheduled_posts') || '[]');
+            const now = new Date();
+            const duePosts = posts.filter(p => p.status === 'pending' && new Date(p.scheduledAt) <= now);
+
+            for (let post of duePosts) {
+              try {
+                await fetch(`https://graph.facebook.com/v21.0/${post.pageId}/feed`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ message: post.content, access_token: post.pageToken })
+                });
+                post.status = 'published';
+              } catch (e) {
+                post.status = 'failed';
+              }
+            }
+            localStorage.setItem('scheduled_posts', JSON.stringify(posts));
+          });
+          ENDOFFILE
+
+          cat > src/main.tsx << 'ENDOFFILE'
+          import React from 'react';
+          import ReactDOM from 'react-dom/client';
+          import App from './App';
+          import './index.css';
+          ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+          ENDOFFILE
+
+          cat > src/index.css << 'ENDOFFILE'
+          @tailwind base;
+          @tailwind components;
+          @tailwind utilities;
+          body { @apply bg-[#0F172A] text-slate-200 antialiased; font-family: 'Inter', system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+          .scrollbar-hide::-webkit-scrollbar { display: none; }
+          .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+          ENDOFFILE
+
+          cat > src/lib/utils.ts << 'ENDOFFILE'
+          import { clsx, type ClassValue } from 'clsx';
+          import { twMerge } from 'tailwind-merge';
+          export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
+          ENDOFFILE
+
+          cat > src/App.tsx << 'ENDOFFILE'
+          import { BrowserRouter, Routes, Route } from 'react-router-dom';
+          import { AppLayout } from '@/components/layout/AppLayout';
+          import Dashboard from '@/pages/Dashboard';
+          import Compose from '@/pages/Compose';
+          import Pages from '@/pages/Pages';
+          import Library from '@/pages/Library';
+          import More from '@/pages/More';
+
+          export default function App() {
+            return (
+              <BrowserRouter>
+                <Routes>
+                  <Route element={<AppLayout />}>
+                    <Route path="/" element={<Dashboard />} />
+                    <Route path="/post" element={<Compose />} />
+                    <Route path="/pages" element={<Pages />} />
+                    <Route path="/library" element={<Library />} />
+                    <Route path="/more" element={<More />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/components/layout/AppLayout.tsx << 'ENDOFFILE'
+          import { Outlet, NavLink } from 'react-router-dom';
+          import { Home, LayoutGrid, Plus, Video, Menu } from 'lucide-react';
+          import { cn } from '@/lib/utils';
+
+          const navItems = [
+            { to: '/', icon: Home, label: 'Home' },
+            { to: '/pages', icon: LayoutGrid, label: 'Pages' },
+            { to: '/post', icon: Plus, label: 'Post', isCenter: true },
+            { to: '/library', icon: Video, label: 'Library' },
+            { to: '/more', icon: Menu, label: 'More' },
+          ];
+
+          export function AppLayout() {
+            return (
+              <div className="flex flex-col min-h-screen bg-[#0F172A] pb-20">
+                <main className="flex-1 overflow-y-auto"><Outlet /></main>
+                <nav className="fixed bottom-0 left-0 right-0 bg-[#0F172A] border-t border-slate-800 flex justify-around items-center h-16 px-2 z-50">
+                  {navItems.map(({ to, icon: Icon, label, isCenter }) => (
+                    <NavLink key={to} to={to} className={({ isActive }) => cn('flex flex-col items-center justify-center w-full h-full space-y-1', isActive ? 'text-orange-500' : 'text-slate-400 hover:text-slate-300')}>
+                      {isCenter ? (
+                        <div className="bg-orange-500 text-white p-3 rounded-full -mt-6 shadow-lg shadow-orange-500/30"><Icon size={24} /></div>
+                      ) : (<Icon size={22} />)}
+                      <span className={cn("text-[10px] font-medium", isCenter && "mt-1")}>{label}</span>
+                    </NavLink>
+                  ))}
+                </nav>
+              </div>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/pages/Dashboard.tsx << 'ENDOFFILE'
+          import { useState } from 'react';
+          import { Bell, Power, LayoutGrid, CheckCircle2, AlertCircle, Clock, Users, ChevronRight } from 'lucide-react';
+
+          export default function Dashboard() {
+            const [engineOn, setEngineOn] = useState(false);
+
+            return (
+              <div className="p-5 space-y-5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-slate-400 text-sm">Hi, Abdul</p>
+                    <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Bell size={20} className="text-slate-300" />
+                    <button className="bg-orange-500 text-white text-xs font-bold px-3 py-1.5 rounded-full">Upgrade</button>
+                  </div>
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 flex items-center gap-4 border border-slate-800">
+                  <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center font-bold text-red-600 text-xl">A</div>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-white">Adsterra earnings</h3>
+                    <p className="text-xs text-slate-400">Add your publisher API keys to see revenue here.</p>
+                  </div>
+                  <ChevronRight size={18} className="text-slate-500" />
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 border border-slate-800">
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${engineOn ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                      <h3 className="font-semibold text-white">{engineOn ? 'Engine Running' : 'Engine stopped'}</h3>
+                    </div>
+                    <button onClick={() => setEngineOn(!engineOn)} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${engineOn ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-orange-500 shadow-orange-500/20'}`}>
+                      <Power size={22} className="text-white" />
+                    </button>
+                  </div>
+                  <p className="text-xs text-slate-400">Start it to post your schedule all day, even with the app closed</p>
+                  <p className="text-xs text-orange-500 mt-2 font-medium">Phone has an Auto-start setting? Turn it on for AlcashGo</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { label: 'Total Pages', value: '0', icon: LayoutGrid, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+                    { label: 'Active Pages', value: '0', icon: CheckCircle2, color: 'text-orange-500', bg: 'bg-orange-500/10' },
+                    { label: 'Posted', value: '0', icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+                    { label: 'Failed', value: '0', icon: AlertCircle, color: 'text-red-500', bg: 'bg-red-500/10' },
+                    { label: 'Scheduled', value: '0', icon: Clock, color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+                    { label: 'Followers', value: '0', icon: Users, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+                  ].map((stat, i) => (
+                    <div key={i} className="bg-[#1E293B] rounded-xl p-4 border border-slate-800">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center mb-3 ${stat.bg}`}><stat.icon size={16} className={stat.color} /></div>
+                      <p className="text-2xl font-bold text-white">{stat.value}</p>
+                      <p className="text-xs text-slate-400">{stat.label}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/pages/Compose.tsx << 'ENDOFFILE'
+          import { useState } from 'react';
+          import { Image as ImageIcon, Smartphone, Send } from 'lucide-react';
+
+          export default function Compose() {
+            const [activeTab, setActiveTab] = useState('schedule');
+            const [postType, setPostType] = useState('reel');
+            const [when, setWhen] = useState('now');
+            const [content, setContent] = useState('');
+            const [firstComment, setFirstComment] = useState(false);
+            const [date, setDate] = useState('');
+
+            const handlePost = async () => {
+              if (!content) return alert('Please write a caption!');
+              
+              const pages = JSON.parse(localStorage.getItem('connected_pages') || '[]');
+              if (pages.length === 0) return alert('Please connect a page first in Pages tab!');
+
+              const posts = JSON.parse(localStorage.getItem('scheduled_posts') || '[]');
+              posts.push({
+                pageId: pages[0].id,
+                pageToken: pages[0].access_token,
+                content: content,
+                scheduledAt: when === 'now' ? new Date() : new Date(date),
+                status: 'pending'
+              });
+              localStorage.setItem('scheduled_posts', JSON.stringify(posts));
+              alert(when === 'now' ? 'Posting started from Phone!' : 'Post Scheduled on Phone!');
+            };
+
+            return (
+              <div className="p-5 space-y-5 pb-24">
+                <h1 className="text-2xl font-bold text-white">Create</h1>
+
+                <div className="flex bg-[#1E293B] rounded-xl p-1 border border-slate-800">
+                  <button onClick={() => setActiveTab('schedule')} className={`flex-1 py-2 text-sm font-semibold rounded-lg ${activeTab === 'schedule' ? 'bg-orange-500 text-white' : 'text-slate-400'}`}>Schedule a post</button>
+                  <button onClick={() => setActiveTab('bulk')} className={`flex-1 py-2 text-sm font-semibold rounded-lg ${activeTab === 'bulk' ? 'bg-orange-500 text-white' : 'text-slate-400'}`}>Bulk Daily</button>
+                </div>
+                <p className="text-xs text-slate-400">Stories, Bulk Daily and First Comment are Lifetime features.</p>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Pages</h3>
+                  <p className="text-orange-500 text-sm">Turn on at least one Page in the Pages tab.</p>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Type</h3>
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    {['Reel', 'Image', 'Img story', 'Reel story'].map((t) => (
+                      <button key={t} onClick={() => setPostType(t.toLowerCase())} className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap ${postType === t.toLowerCase() ? 'bg-orange-500 text-white' : 'bg-[#1E293B] text-slate-300 border border-slate-800'}`}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Media</h3>
+                  <div className="flex gap-3">
+                    <button className="flex-1 bg-[#1E293B] border border-slate-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium"><ImageIcon size={18} /> From library</button>
+                    <button className="flex-1 bg-[#1E293B] border border-slate-700 text-white py-3 rounded-xl flex items-center justify-center gap-2 text-sm font-medium"><Smartphone size={18} /> From phone</button>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">Caption</h3>
+                  <div className="bg-[#1E293B] border border-slate-800 rounded-xl p-4">
+                    <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={4} placeholder="Write a caption. Paste several (empty line between) to rotate them across Pages." className="w-full bg-transparent text-sm text-white placeholder-slate-500 outline-none resize-none" />
+                    <p className="text-xs text-orange-500 mt-2">0 found</p>
+                    <div className="flex gap-2 mt-2">
+                      <button className="bg-orange-500 text-white text-xs font-medium px-4 py-1.5 rounded-lg">Random</button>
+                      <button className="text-slate-400 text-xs font-medium px-4 py-1.5 rounded-lg">Use & remove</button>
+                      <button className="text-slate-400 text-xs font-medium px-4 py-1.5 rounded-lg">One for all</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-[#1E293B] border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-white text-sm">Add first comment</h3>
+                    <p className="text-xs text-slate-400">Lifetime feature</p>
+                  </div>
+                  <button onClick={() => setFirstComment(!firstComment)} className={`w-12 h-6 rounded-full transition-colors ${firstComment ? 'bg-orange-500' : 'bg-slate-700'} relative`}>
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-1 transition-transform ${firstComment ? 'translate-x-7' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider">When</h3>
+                  <div className="flex bg-[#1E293B] rounded-xl p-1 border border-slate-800 mb-3">
+                    <button onClick={() => setWhen('now')} className={`flex-1 py-2 text-sm font-semibold rounded-lg ${when === 'now' ? 'bg-orange-500 text-white' : 'text-slate-400'}`}>Post now</button>
+                    <button onClick={() => setWhen('schedule')} className={`flex-1 py-2 text-sm font-semibold rounded-lg ${when === 'schedule' ? 'bg-orange-500 text-white' : 'text-slate-400'}`}>Schedule</button>
+                  </div>
+                  {when === 'schedule' && (
+                    <input type="datetime-local" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-[#1E293B] border border-slate-800 text-white rounded-xl py-3 px-4 outline-none focus:border-orange-500" />
+                  )}
+                </div>
+
+                <button onClick={handlePost} className="w-full bg-orange-500 text-white font-semibold py-4 rounded-xl flex items-center justify-center gap-2 mt-4 shadow-lg shadow-orange-500/20">
+                  <Send size={18} /> {when === 'now' ? 'Post now' : 'Schedule Post'}
+                </button>
+              </div>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/pages/Pages.tsx << 'ENDOFFILE'
+          import { useState, useEffect } from 'react';
+          import { Search, LayoutGrid } from 'lucide-react';
+          import { Browser } from '@capacitor/browser';
+          import { App } from '@capacitor/app';
+
+          export default function Pages() {
+            const [pages, setPages] = useState<any[]>([]);
+
+            useEffect(() => {
+              const savedPages = JSON.parse(localStorage.getItem('connected_pages') || '[]');
+              setPages(savedPages);
+
+              // Deep Link Listener (Jab Facebook se wapas aaye)
+              const listener = App.addListener('appUrlOpen', async (event) => {
+                if (event.url.includes('auth')) {
+                  const url = new URL(event.url);
+                  const code = url.searchParams.get('code');
+                  if (code) {
+                    await Browser.close();
+                    await exchangeToken(code);
+                  }
+                }
+              });
+              return () => { listener.then(l => l.remove()); };
+            }, []);
+
+            const connectFacebook = async () => {
+              const appId = localStorage.getItem('fb_app_id');
+              if (!appId) return alert('Please set your Facebook App ID in Settings (More tab) first!');
+
+              // Custom Deep Link URI
+              const redirectUri = 'com.alcashgo.clone://auth'; 
+              const url = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${appId}&redirect_uri=${redirectUri}&scope=pages_manage_posts,pages_show_list`;
+              await Browser.open({ url });
+            };
+
+            const exchangeToken = async (code: string) => {
+              const appId = localStorage.getItem('fb_app_id');
+              const appSecret = localStorage.getItem('fb_app_secret');
+              const redirectUri = 'com.alcashgo.clone://auth';
+
+              try {
+                const tokenRes = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&client_secret=${appSecret}&redirect_uri=${redirectUri}&code=${code}`);
+                const tokenData = await tokenRes.json();
+                
+                if (tokenData.error) throw new Error(tokenData.error.message);
+
+                const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?access_token=${tokenData.access_token}`);
+                const pagesData = await pagesRes.json();
+
+                if (pagesData.data) {
+                  localStorage.setItem('connected_pages', JSON.stringify(pagesData.data));
+                  setPages(pagesData.data);
+                  alert('Facebook Connected Successfully!');
+                }
+              } catch (err: any) {
+                alert('Error: ' + err.message);
+              }
+            };
+
+            return (
+              <div className="p-5 space-y-5">
+                <div className="flex justify-between items-center">
+                  <h1 className="text-2xl font-bold text-white">Pages</h1>
+                  <LayoutGrid size={20} className="text-slate-400" />
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 flex items-center justify-between border border-slate-800">
+                  <div>
+                    <h3 className="font-semibold text-white">Free plan · unlimited Pages</h3>
+                    <p className="text-xs text-slate-400 mt-1">{pages.length} Pages connected.</p>
+                  </div>
+                  <button className="bg-orange-500 text-white text-xs font-bold px-4 py-2 rounded-lg">Upgrade</button>
+                </div>
+
+                <div className="relative">
+                  <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input type="text" placeholder="Search Pages" className="w-full bg-[#1E293B] border border-slate-800 text-white rounded-xl py-3 pl-11 pr-4 outline-none focus:border-orange-500" />
+                </div>
+
+                {pages.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center mt-20 space-y-4">
+                    <div className="w-20 h-20 bg-[#1E293B] rounded-2xl flex items-center justify-center border border-slate-800">
+                      <LayoutGrid size={32} className="text-orange-500" />
+                    </div>
+                    <h2 className="text-xl font-bold text-white">No Pages yet</h2>
+                    <p className="text-sm text-slate-400 text-center px-8">Connect your own Facebook app to bring in your Pages.</p>
+                    <button onClick={connectFacebook} className="bg-orange-500 text-white font-semibold px-8 py-3 rounded-xl mt-2">Connect</button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 mt-4">
+                    {pages.map((page: any) => (
+                      <div key={page.id} className="bg-[#1E293B] rounded-xl p-4 border border-slate-800 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">{page.name.charAt(0)}</div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-white">{page.name}</h3>
+                          <p className="text-xs text-slate-400">ID: {page.id}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/pages/Library.tsx << 'ENDOFFILE'
+          import { Plus, Folder, Sparkles } from 'lucide-react';
+
+          export default function Library() {
+            return (
+              <div className="p-5 space-y-5">
+                <div className="flex justify-between items-center">
+                  <h1 className="text-2xl font-bold text-white">Library</h1>
+                  <button className="bg-[#1E293B] p-2 rounded-lg border border-slate-800"><Plus size={20} className="text-white" /></button>
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 border border-slate-800">
+                  <h3 className="font-semibold text-white">0 files in 1 folders</h3>
+                  <p className="text-xs text-slate-400 mt-1 mb-4">Files stay on your phone. AlcashGo only remembers where they are and uploads them when a post goes out.</p>
+                  <div className="flex gap-3">
+                    <button className="flex-1 bg-orange-500 text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm"><Sparkles size={16} /> Page folder set</button>
+                    <button className="flex-1 bg-[#0F172A] border border-slate-700 text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm"><Plus size={16} /> Folder</button>
+                  </div>
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 border border-slate-800 flex items-center gap-4">
+                  <div className="w-10 h-10 bg-yellow-500/10 rounded-lg flex items-center justify-center"><Folder size={20} className="text-yellow-500" /></div>
+                  <div className="flex-1"><h3 className="font-semibold text-white">khan</h3><p className="text-xs text-slate-400">0 videos · 0 images</p></div>
+                </div>
+              </div>
+            );
+          }
+          ENDOFFILE
+
+          cat > src/pages/More.tsx << 'ENDOFFILE'
+          import { useState } from 'react';
+          import { Crown, Bell, Gift, Video, DollarSign, Link, ListOrdered, TrendingUp, BatteryCharging, LogOut, ChevronRight, Settings } from 'lucide-react';
+
+          export default function More() {
+            const [showSettings, setShowSettings] = useState(false);
+            const [appId, setAppId] = useState(localStorage.getItem('fb_app_id') || '');
+            const [appSecret, setAppSecret] = useState(localStorage.getItem('fb_app_secret') || '');
+
+            const saveSettings = () => {
+              localStorage.setItem('fb_app_id', appId);
+              localStorage.setItem('fb_app_secret', appSecret);
+              alert('Settings Saved!');
+              setShowSettings(false);
+            };
+
+            const menuItems = [
+              { icon: Crown, label: 'Plan & payment', desc: 'Upgrade for Stories, Bulk Daily and First Comment', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+              { icon: Bell, label: 'Notifications', desc: 'Offers, rewards and news', color: 'text-orange-500', bg: 'bg-orange-500/10' },
+              { icon: Gift, label: 'Invite and earn', desc: 'Cash for every friend who buys Lifetime', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+              { icon: Video, label: 'Video guides', desc: 'Learn AlcashGo step by step', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+              { icon: DollarSign, label: 'Adsterra earnings', desc: 'Revenue and views from all your Adsterra accounts', color: 'text-orange-500', bg: 'bg-orange-500/10' },
+              { icon: Link, label: 'Connections', desc: 'Facebook app, Magic Link, Zernio', color: 'text-yellow-500', bg: 'bg-yellow-500/10' },
+              { icon: ListOrdered, label: 'Queue & history', desc: '0 upcoming', color: 'text-orange-500', bg: 'bg-orange-500/10' },
+              { icon: TrendingUp, label: 'Analytics', desc: 'Posts, failures and Page performance', color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+              { icon: BatteryCharging, label: 'Reliable background posting', desc: 'Let AlcashGo run when the screen is off', color: 'text-blue-500', bg: 'bg-blue-500/10' },
+            ];
+
+            return (
+              <div className="p-5 space-y-6 pb-24">
+                <h1 className="text-2xl font-bold text-white">More</h1>
+
+                <div className="bg-[#1E293B] rounded-2xl p-4 border border-slate-800 flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white font-bold text-xl overflow-hidden">
+                    <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Abdul" alt="User" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-white text-lg">Abdul Basit 72</h3>
+                    <p className="text-xs text-slate-400">mrabtricks76@gmail.com</p>
+                  </div>
+                  <span className="bg-slate-700 text-slate-300 text-[10px] font-bold px-2 py-1 rounded-md">FREE</span>
+                </div>
+
+                <div className="bg-[#1E293B] rounded-xl p-4 border border-slate-800">
+                  <button onClick={() => setShowSettings(!showSettings)} className="w-full flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-slate-700/50"><Settings size={20} className="text-slate-300" /></div>
+                      <div className="text-left">
+                        <h3 className="font-semibold text-white text-sm">Your Own Facebook App</h3>
+                        <p className="text-xs text-slate-400">Enter App ID & Secret (BYOA)</p>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className={`text-slate-600 transition-transform ${showSettings ? 'rotate-90' : ''}`} />
+                  </button>
+
+                  {showSettings && (
+                    <div className="mt-4 space-y-3 pt-4 border-t border-slate-700">
+                      <input type="text" placeholder="Facebook App ID" value={appId} onChange={(e) => setAppId(e.target.value)} className="w-full bg-[#0F172A] border border-slate-700 text-white rounded-lg py-2 px-3 text-sm outline-none focus:border-orange-500" />
+                      <input type="password" placeholder="Facebook App Secret" value={appSecret} onChange={(e) => setAppSecret(e.target.value)} className="w-full bg-[#0F172A] border border-slate-700 text-white rounded-lg py-2 px-3 text-sm outline-none focus:border-orange-500" />
+                      <button onClick={saveSettings} className="w-full bg-orange-500 text-white font-semibold py-2 rounded-lg text-sm">Save Keys</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  {menuItems.map((item, i) => (
+                    <div key={i} className="flex items-center gap-4 py-3 border-b border-slate-800/50 last:border-0">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${item.bg}`}><item.icon size={20} className={item.color} /></div>
+                      <div className="flex-1"><h3 className="font-semibold text-white text-sm">{item.label}</h3><p className="text-xs text-slate-400 mt-0.5">{item.desc}</p></div>
+                      <ChevronRight size={18} className="text-slate-600" />
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-4 py-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-red-500/10"><LogOut size={20} className="text-red-500" /></div>
+                  <h3 className="font-semibold text-white text-sm">Sign out</h3>
+                </div>
+
+                <p className="text-xs text-slate-600 mt-8">AlcashGo 2.1.16</p>
+              </div>
+            );
+          }
+          ENDOFFILE
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # Yahan hum AndroidManifest mein Deep Link add kar rahe hain
+      - name: Add Deep Link to AndroidManifest
+        run: |
+          sed -i 's|<activity|<intent-filter android:autoVerify="true"><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="com.alcashgo.clone" android:host="auth" /></intent-filter><activity|' android/app/src/main/AndroidManifest.xml
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: alcashgo-clone-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
