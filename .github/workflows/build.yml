@@ -42,8 +42,6 @@ jobs:
               "@capacitor/browser": "^6.0.2",
               "@capacitor/app": "^6.0.1",
               "@capacitor/preferences": "^6.0.1",
-              "@capacitor/camera": "^6.1.0",
-              "@capacitor-community/background-mode": "^1.0.0",
               "clsx": "^2.1.1",
               "lucide-react": "^0.454.0",
               "react": "^18.3.1",
@@ -207,24 +205,9 @@ jobs:
           cat > src/pages/Dashboard.tsx << 'ENDOFFILE'
           import { useState, useEffect } from 'react';
           import { Bell, Power, LayoutGrid, CheckCircle2, AlertCircle, Clock, Users, ChevronRight } from 'lucide-react';
-          import { BackgroundMode } from '@capacitor-community/background-mode';
 
           export default function Dashboard() {
             const [engineOn, setEngineOn] = useState(false);
-
-            const toggleEngine = async () => {
-              try {
-                if (!engineOn) {
-                  await BackgroundMode.enable();
-                  setEngineOn(true);
-                } else {
-                  await BackgroundMode.disable();
-                  setEngineOn(false);
-                }
-              } catch (e) {
-                alert("Background mode failed. Check permissions.");
-              }
-            };
 
             useEffect(() => {
               let interval: any;
@@ -236,7 +219,6 @@ jobs:
 
                   for (let post of duePosts) {
                     try {
-                      // Real Facebook Posting
                       await fetch(`https://graph.facebook.com/v21.0/${post.pageId}/feed`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -281,7 +263,7 @@ jobs:
                       <div className={`w-2 h-2 rounded-full ${engineOn ? 'bg-emerald-500' : 'bg-slate-500'}`} />
                       <h3 className="font-semibold text-white">{engineOn ? 'Engine Running' : 'Engine stopped'}</h3>
                     </div>
-                    <button onClick={toggleEngine} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${engineOn ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-orange-500 shadow-orange-500/20'}`}>
+                    <button onClick={() => setEngineOn(!engineOn)} className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg ${engineOn ? 'bg-emerald-500 shadow-emerald-500/20' : 'bg-orange-500 shadow-orange-500/20'}`}>
                       <Power size={22} className="text-white" />
                     </button>
                   </div>
@@ -662,7 +644,6 @@ jobs:
       - name: Sync Capacitor
         run: npx cap sync android
 
-      # Auto-Fix AndroidManifest (Deep Link + Background Permissions)
       - name: Auto-Fix AndroidManifest
         run: |
           node -e "
@@ -670,16 +651,9 @@ jobs:
             const path = 'android/app/src/main/AndroidManifest.xml';
             let content = fs.readFileSync(path, 'utf8');
             
-            // Deep Link Intent Filter
             const intentFilter = '<intent-filter android:autoVerify=\"true\"><action android:name=\"android.intent.action.VIEW\" /><category android:name=\"android.intent.category.DEFAULT\" /><category android:name=\"android.intent.category.BROWSABLE\" /><data android:scheme=\"com.alcashgo.clone\" android:host=\"auth\" /></intent-filter>';
             if (!content.includes('com.alcashgo.clone')) {
               content = content.replace('</activity>', intentFilter + '</activity>');
-            }
-
-            // Background Mode Permissions
-            const permissions = '<uses-permission android:name=\"android.permission.WAKE_LOCK\" /><uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" />';
-            if (!content.includes('WAKE_LOCK')) {
-              content = content.replace('<application', permissions + '<application');
             }
 
             fs.writeFileSync(path, content);
